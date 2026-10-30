@@ -3,14 +3,20 @@
  * AIContentSummary 公共 API 逻辑
  *
  * 该文件不依赖任何 Typecho 类，可被插件（Plugin.php）、
- * 路由版接口（Action.php）和独立接口（test.php）共同加载。
+ * 路由版接口（Action.php）和独立接口（test.php / regen.php）共同加载。
+ *
+ * 2.1.0 起同时兼容两套配置键名：
+ *  - 本插件历史版本：modelName / keyValue / apiUrl / maxLength / enableAuto
+ *  - 上游 2.0.0   ：fieldName / summaryLength / finishPublishSummary /
+ *                   outputSummaryInHeader / summaryTemplate / prompt
+ * 读取统一走 cfg()，写入顺序为「历史名优先」，因此从任意方向升级都不会丢配置。
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
  * 修改者 Andrew（https://moechu.cn），Apache-2.0。
  *
  * @package AIContentSummary
  * @author Andrew (Andrew8102)
- * @version 1.8.2
+ * @version 2.1.0
  * @link https://moechu.cn
  */
 
@@ -19,9 +25,125 @@ if (!class_exists('AIContentSummary_Api')) {
     class AIContentSummary_Api
     {
         /**
+         * 版本号（与插件头保持一致）
+         */
+        const VERSION = '2.1.0';
+
+        /**
          * 默认模型
          */
         const DEFAULT_MODEL = 'gpt-3.5-turbo-16k';
+
+        /**
+         * 默认摘要字段名（与 1.x 一致，勿改，否则旧文章摘要失效）
+         */
+        const DEFAULT_FIELD = 'content';
+
+        /**
+         * 默认正文前置摘要模板（与上游 2.0 一致）
+         */
+        const DEFAULT_TEMPLATE = '<aside class="ai-content-summary"><strong>摘要：</strong><p>{summary}</p></aside>';
+
+        /**
+         * 配置键别名表：逻辑名 => 依优先级排列的物理键名
+         *
+         * 顺序很重要：先读本插件历史键名，再读上游 2.0 键名。
+         * 这样本站点升级不会因为上游键名为空而把已配置的模型/密钥覆盖成默认值。
+         *
+         * @var array
+         */
+        private static $aliasMap = array(
+            'model' => array('modelName'),
+            'key' => array('keyValue', 'apiKey'),
+            'apiUrl' => array('apiUrl'),
+            'maxLength' => array('maxLength', 'summaryLength'),
+            'autoGenerate' => array('enableAuto', 'finishPublishSummary'),
+            'fieldName' => array('fieldName'),
+            'outputInHeader' => array('outputSummaryInHeader'),
+            'template' => array('summaryTemplate'),
+            'prompt' => array('prompt')
+        );
+
+        /**
+         * 按逻辑名读取配置（自动处理历史键名 / 上游键名别名）
+         *
+         * @param mixed  $config
+         * @param string $logicalName 逻辑名：model/key/apiUrl/maxLength/autoGenerate/fieldName/outputInHeader/template/prompt
+         * @param string $default
+         * @return string
+         */
+        public static function cfg($config, $logicalName, $default = '')
+        {
+            $keys = isset(self::$aliasMap[$logicalName])
+                ? self::$aliasMap[$logicalName]
+                : array($logicalName);
+
+            foreach ($keys as $key) {
+                $value = self::opt($config, $key, null);
+                if ($value !== null && $value !== '') {
+                    return $value;
+                }
+            }
+
+            return $default;
+        }
+
+        /**
+         * 摘要字段名（去掉非法字符，兜底 content）
+         *
+         * @param mixed $config
+         * @return string
+         */
+        public static function fieldName($config)
+        {
+            $name = trim(self::cfg($config, 'fieldName', self::DEFAULT_FIELD));
+
+            // 上游 2.0 允许自定义字段名，这里做一次合法性收敛，避免拼进 SQL 出问题
+            if (!preg_match('/^[_a-zA-Z][_a-zA-Z0-9]*$/', $name)) {
+                return self::DEFAULT_FIELD;
+            }
+
+            return $name;
+        }
+
+        /**
+         * 摘要目标长度（<=0 一律按 100）
+         *
+         * @param mixed $config
+         * @return int
+         */
+        public static function maxLength($config)
+        {
+            $value = (int) self::cfg($config, 'maxLength', '100');
+
+            return $value > 0 ? $value : 100;
+        }
+
+        /**
+         * 把摘要套进模板（正文前置摘要用）
+         *
+         * @param string $template 必须包含 {summary}
+         * @param string $summary
+         * @return string
+         */
+        public static function wrapSummary($template, $summary)
+        {
+            $template = (string) $template;
+            if ($template === '') {
+                $template = self::DEFAULT_TEMPLATE;
+            }
+
+            if (strpos($template, '{summary}') === false) {
+                // 模板写错了也别把正文吞掉，直接把摘要前置
+                return $summary;
+            }
+
+            return str_replace(
+                '{summary}',
+                htmlspecialchars((string) $summary, ENT_QUOTES, 'UTF-8'),
+                $template
+            );
+        }
 
         /**
          * 安全读取配置值
@@ -53,6 +175,175 @@ if (!class_exists('AIContentSummary_Api')) {
             }
 
             return (string) $value;
+        }
+
+        /**
+         * 生成摘要用的系统提示词
+         *
+         * 上游 2.0 允许自定义 prompt，这里两套都认：配置里有 prompt 就用它，
+         * 没有就沿用本插件历史内置的「摘要生成器」提示词，保持既有输出风格。
+         *
+         * @param mixed $config
+         * @param string $title   文章标题
+         * @param int    $maxLength
+         * @return string
+         */
+        public static function systemPrompt($config, $title, $maxLength)
+        {
+            $custom = trim(self::cfg($config, 'prompt', ''));
+            if ($custom !== '') {
+                return $custom;
+            }
+
+            return '请你扮演一个文本摘要生成器，下面是一篇关于 “' . $title . '” 的文章，'
+                . '请你根据文章内容生成 ' . (int) $maxLength . ' 字左右的摘要，'
+                . '除了你生成的摘要内容，请不要输出其他任何无关内容';
+        }
+
+        /**
+         * 组装 messages
+         *
+         * @param mixed  $config
+         * @param string $title
+         * @param string $plainText 已清洗的正文
+         * @param int    $maxLength
+         * @return array
+         */
+        public static function buildMessages($config, $title, $plainText, $maxLength)
+        {
+            return array(
+                array('role' => 'system', 'content' => self::systemPrompt($config, $title, $maxLength)),
+                array('role' => 'user', 'content' => (string) $plainText)
+            );
+        }
+
+        /**
+         * 一次性生成摘要（带截断放大重试 + 推理兜底）
+         *
+         * 把「拼请求 → 调接口 → 解析 → 重试 → 兜底」这段逻辑收敛到一处，
+         * 插件发布钩子、后台手动生成、regen.php 全都走这里，避免三处行为不一致。
+         *
+         * @param mixed  $config    插件配置（Config 对象或数组）
+         * @param string $title     文章标题
+         * @param string $text      文章正文（未清洗）
+         * @param int    $timeout   单次请求超时秒数
+         * @return array{ok:bool,summary:string,msg:string,detail:string,cost:int,finish:string,maxTokens:int}
+         */
+        public static function generateSummary($config, $title, $text, $timeout = 60)
+        {
+            $fail = array(
+                'ok' => false,
+                'summary' => '',
+                'msg' => '',
+                'detail' => '',
+                'cost' => 0,
+                'finish' => '',
+                'maxTokens' => 0
+            );
+
+            $model = trim(self::cfg($config, 'model', self::DEFAULT_MODEL));
+            if ($model === '') {
+                $model = self::DEFAULT_MODEL;
+            }
+
+            $apiKey = trim(self::cfg($config, 'key'));
+            $apiUrl = trim(self::cfg($config, 'apiUrl'));
+            $maxLength = self::maxLength($config);
+
+            if ($apiKey === '' || $apiUrl === '') {
+                $fail['msg'] = 'API 地址或 API KEY 为空，请先在插件设置里填写并保存';
+
+                return $fail;
+            }
+
+            $plainText = self::prepareText($text, 8000);
+            if ($plainText === '') {
+                $fail['msg'] = '文章内容为空，无法生成摘要';
+
+                return $fail;
+            }
+
+            $endpoint = self::buildEndpoint($apiUrl);
+            $payload = self::buildPayload(
+                $model,
+                self::buildMessages($config, $title, $plainText, $maxLength),
+                // 思考型模型要额外留推理预算，否则正文会被 reasoning 挤空
+                array('max_tokens' => self::maxTokensFor($model, $maxLength))
+            );
+
+            $fail['maxTokens'] = (int) $payload['max_tokens'];
+
+            // 最多两轮：正文为空且 finish=length（被截断）时，放大预算再试一次
+            $parsed = array('reply' => '', 'finish' => '', 'reasoning' => '', 'error' => '');
+            $res = null;
+            $cost = 0;
+
+            for ($round = 0; $round < 2; $round++) {
+                $start = microtime(true);
+                $res = self::postChat($endpoint, $apiKey, $payload, $timeout);
+                $cost += (int) round((microtime(true) - $start) * 1000);
+
+                if (!$res['success'] || (int) $res['httpCode'] !== 200) {
+                    break;
+                }
+
+                $parsed = self::parseReply($res['body']);
+
+                if ($parsed['reply'] !== '') {
+                    break;
+                }
+
+                // 被截断：放大 max_tokens 再来一次
+                if ($round === 0 && $parsed['finish'] === 'length') {
+                    $payload['max_tokens'] = min(32768, max(8192, (int) $payload['max_tokens'] * 4));
+                    $fail['maxTokens'] = (int) $payload['max_tokens'];
+                    continue;
+                }
+
+                break;
+            }
+
+            if (!$res || !$res['success'] || (int) $res['httpCode'] !== 200) {
+                $fail['cost'] = $cost;
+                $fail['msg'] = 'API 调用失败';
+                $fail['detail'] = self::cut(
+                    $res && $res['success'] ? $res['body'] : ($res ? $res['error'] : ''),
+                    400
+                );
+
+                return $fail;
+            }
+
+            $fail['cost'] = $cost;
+            $fail['finish'] = (string) $parsed['finish'];
+
+            $summary = trim((string) $parsed['reply']);
+
+            // 正文为空：从推理残留里捞一份草稿，避免整批任务全部失败
+            if ($summary === '') {
+                $summary = self::extractFromReasoning($parsed['reasoning'], $maxLength);
+            }
+
+            if ($summary === '') {
+                $fail['msg'] = '模型没有返回正文（finish_reason=' . $parsed['finish']
+                    . '，已用 max_tokens=' . $payload['max_tokens'] . ' 重试）'
+                    . ($parsed['finish'] === 'length'
+                        ? '，建议换成非思考型模型或调小摘要长度'
+                        : '');
+                $fail['detail'] = self::cut((string) $res['body'], 400);
+
+                return $fail;
+            }
+
+            return array(
+                'ok' => true,
+                'summary' => $summary,
+                'msg' => '摘要生成成功',
+                'detail' => '',
+                'cost' => $cost,
+                'finish' => (string) $parsed['finish'],
+                'maxTokens' => (int) $payload['max_tokens']
+            );
         }
 
         /**
@@ -515,7 +806,7 @@ if (!class_exists('AIContentSummary_Api')) {
                 CURLOPT_TIMEOUT => (int) $timeout,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_MAXREDIRS => 3,
-                CURLOPT_USERAGENT => 'Typecho-AIContentSummary/1.8.2',
+                CURLOPT_USERAGENT => 'Typecho-AIContentSummary/' . self::VERSION,
                 CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_SSL_VERIFYHOST => 2
             ));
@@ -557,9 +848,9 @@ if (!class_exists('AIContentSummary_Api')) {
          */
         public static function runTest($cfg)
         {
-            $apiUrl = trim(self::opt($cfg, 'apiUrl'));
-            $apiKey = trim(self::opt($cfg, 'keyValue'));
-            $model = trim(self::opt($cfg, 'modelName', self::DEFAULT_MODEL));
+            $apiUrl = trim(self::cfg($cfg, 'apiUrl'));
+            $apiKey = trim(self::cfg($cfg, 'key'));
+            $model = trim(self::cfg($cfg, 'model', self::DEFAULT_MODEL));
 
             if ($apiUrl === '' || $apiKey === '') {
                 return array(

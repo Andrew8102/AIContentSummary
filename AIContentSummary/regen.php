@@ -14,7 +14,7 @@
  *
  * @package AIContentSummary
  * @author Andrew (Andrew8102)
- * @version 1.8.2
+ * @version 2.1.0
  * @link https://moechu.cn
  */
 
@@ -125,7 +125,7 @@ try {
     }
 
     // 令牌校验
-    $apiKey = trim(AIContentSummary_Api::opt($cfg, 'keyValue'));
+    $apiKey = trim(AIContentSummary_Api::cfg($cfg, 'key'));
     $expect = AIContentSummary_Api::token($apiKey);
     $given = isset($_POST['t']) ? (string) $_POST['t'] : '';
     if (!hash_equals($expect, $given)) {
@@ -133,11 +133,13 @@ try {
     }
 
     $cid = isset($_POST['cid']) ? (int) $_POST['cid'] : 0;
+    // 摘要字段名（默认 content；上游 2.0 允许自定义，这里跟着配置走）
+    $fieldName = AIContentSummary_Api::fieldName($cfg);
 
     // ---------- 1. 没传 cid：返回缺少摘要的文章列表 ----------
     if ($cid <= 0) {
-        // 已有「非空」content 字段的 cid（字段存在但值为空的，视为还没有摘要，仍要补）
-        $hasRows = $db->fetchAll($db->select('cid', 'str_value')->from('table.fields')->where('name = ?', 'content'));
+        // 已有「非空」摘要字段的 cid（字段存在但值为空的，视为还没有摘要，仍要补）
+        $hasRows = $db->fetchAll($db->select('cid', 'str_value')->from('table.fields')->where('name = ?', $fieldName));
         $has = array();
         foreach ($hasRows as $r) {
             if (!isset($r['cid'])) {
@@ -194,96 +196,25 @@ try {
     }
 
     $title = (string) $post['title'];
-    $text = AIContentSummary_Api::prepareText(isset($post['text']) ? $post['text'] : '', 8000);
 
-    if ($text === '') {
-        aics_regen_respond(array('ok' => false, 'msg' => '正文为空，跳过：cid=' . $cid, 'stage' => 'content'));
-    }
+    // 生成逻辑统一走 Api::generateSummary()：截断放大重试与 reasoning 兜底都在那里
+    $result = AIContentSummary_Api::generateSummary($cfg, $title, isset($post['text']) ? $post['text'] : '', 60);
 
-    $model = trim(AIContentSummary_Api::opt($cfg, 'modelName', AIContentSummary_Api::DEFAULT_MODEL));
-    $apiUrl = trim(AIContentSummary_Api::opt($cfg, 'apiUrl'));
-    $maxLength = (int) AIContentSummary_Api::opt($cfg, 'maxLength', '100');
-    if ($maxLength <= 0) {
-        $maxLength = 100;
-    }
-
-    $payload = AIContentSummary_Api::buildPayload(
-        $model,
-        array(
-            array(
-                'role' => 'system',
-                'content' => '请你扮演一个文本摘要生成器，下面是一篇关于 “' . $title . '” 的文章，'
-                    . '请你根据文章内容生成 ' . $maxLength . ' 字左右的摘要，'
-                    . '除了你生成的摘要内容，请不要输出其他任何无关内容'
-            ),
-            array('role' => 'user', 'content' => $text)
-        ),
-        // 思考型模型要额外留推理预算，否则正文会被 reasoning 挤成空
-        array('max_tokens' => AIContentSummary_Api::maxTokensFor($model, $maxLength))
-    );
-
-    $endpoint = AIContentSummary_Api::buildEndpoint($apiUrl);
-
-    // 最多两轮：正文为空且 finish=length（被截断）时放大预算重试一次
-    $parsed = array('reply' => '', 'finish' => '', 'reasoning' => '');
-    $res = null;
-    $cost = 0;
-
-    for ($round = 0; $round < 2; $round++) {
-        $start = microtime(true);
-        $res = AIContentSummary_Api::postChat($endpoint, $apiKey, $payload, 60);
-        $cost += (int) round((microtime(true) - $start) * 1000);
-
-        if (!$res['success'] || $res['httpCode'] != 200) {
-            break;
-        }
-
-        $parsed = AIContentSummary_Api::parseReply($res['body']);
-
-        if ($parsed['reply'] !== '') {
-            break;
-        }
-
-        // 被截断：放大 max_tokens 再来一次
-        if ($round === 0 && $parsed['finish'] === 'length') {
-            $payload['max_tokens'] = min(32768, max(8192, (int) $payload['max_tokens'] * 4));
-            continue;
-        }
-
-        break;
-    }
-
-    if (!$res || !$res['success'] || $res['httpCode'] != 200) {
+    if (!$result['ok']) {
         aics_regen_respond(array(
             'ok' => false,
-            'msg' => 'API 调用失败',
+            'msg' => $result['msg'],
             'stage' => 'api',
-            'httpCode' => $res ? $res['httpCode'] : 0,
-            'detail' => AIContentSummary_Api::cut($res && $res['success'] ? $res['body'] : ($res ? $res['error'] : ''), 400),
-            'cost' => $cost . 'ms'
+            'detail' => AIContentSummary_Api::cut($result['detail'], 400),
+            'cost' => $result['cost'] . 'ms'
         ));
     }
 
-    $summary = $parsed['reply'];
-
-    // 正文为空：从推理残留里捞一份草稿，避免整批任务全部失败
-    if ($summary === '') {
-        $summary = AIContentSummary_Api::extractFromReasoning($parsed['reasoning'], $maxLength);
-    }
-
-    if ($summary === '') {
-        aics_regen_respond(array(
-            'ok' => false,
-            'msg' => '模型没有返回正文（finish_reason=' . $parsed['finish'] . '，已用 max_tokens=' . $payload['max_tokens'] . ' 重试）'
-                . ($parsed['finish'] === 'length' ? '，建议把模型换成非思考型的（如 deepseek-chat、kimi-k2.6 非思考版）或调小 maxLength' : ''),
-            'stage' => 'api',
-            'detail' => AIContentSummary_Api::cut($res['body'], 400),
-            'cost' => $cost . 'ms'
-        ));
-    }
+    $summary = $result['summary'];
+    $cost = (int) $result['cost'];
 
     $exists = $db->fetchRow(
-        $db->select('cid')->from('table.fields')->where('cid = ?', $cid)->where('name = ?', 'content')
+        $db->select('cid')->from('table.fields')->where('cid = ?', $cid)->where('name = ?', $fieldName)
     );
 
     if ($exists) {
@@ -291,13 +222,13 @@ try {
             $db->update('table.fields')
                 ->rows(array('str_value' => $summary, 'type' => 'str'))
                 ->where('cid = ?', $cid)
-                ->where('name = ?', 'content')
+                ->where('name = ?', $fieldName)
         );
     } else {
         $db->query(
             $db->insert('table.fields')->rows(array(
                 'cid' => $cid,
-                'name' => 'content',
+                'name' => $fieldName,
                 'type' => 'str',
                 'str_value' => $summary,
                 'int_value' => 0,

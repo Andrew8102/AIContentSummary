@@ -15,7 +15,7 @@
  *
  * @package AIContentSummary
  * @author Andrew (Andrew8102)
- * @version 1.8.2
+ * @version 2.1.0
  * @link https://moechu.cn
  */
 
@@ -148,7 +148,7 @@ try {
     }
 
     // 令牌校验：由 API KEY 派生，外部猜不到，避免接口被陌生请求拿去刷额度
-    $apiKey = trim(AIContentSummary_Api::opt($cfg, 'keyValue'));
+    $apiKey = trim(AIContentSummary_Api::cfg($cfg, 'key'));
     if ($apiKey !== '') {
         $expect = AIContentSummary_Api::token($apiKey);
         $given = isset($_POST['t']) ? (string) $_POST['t'] : '';
