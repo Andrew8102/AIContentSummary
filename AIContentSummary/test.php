@@ -11,12 +11,12 @@
  * 不依赖插件是否重新启用，上传即可用。
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
- * 修改者 Andrew（https://moechu.cn），Apache-2.0。
+ * 修改者 Andrew8102，Apache-2.0。
  *
  * @package AIContentSummary
- * @author Andrew (Andrew8102)
+ * @author Rockytkg, Andrew8102
  * @version 2.1.0
- * @link https://moechu.cn
+ * @link https://github.com/Rockytkg/AIContentSummary
  */
 
 // 先关掉错误显示，避免 PHP 警告混进 JSON（错误仍会写进 error_log）

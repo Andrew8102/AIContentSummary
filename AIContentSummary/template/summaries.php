@@ -11,7 +11,7 @@
  *  - 批量生成逐条串行，失败只提示不中断。
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
- * 修改者 Andrew（https://moechu.cn），Apache-2.0。
+ * 修改者 Andrew8102，Apache-2.0。
  *
  * @package AIContentSummary
  * @version 2.1.0

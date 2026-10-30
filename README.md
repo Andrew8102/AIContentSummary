@@ -6,10 +6,10 @@ AIContentSummary 是一个用于通过调用 AI 接口，根据文章内容生�
 >
 > - 原始项目：[Rockytkg/AIContentSummary](https://github.com/Rockytkg/AIContentSummary)
 > - 原作者：Rockytkg，遵循 **Apache License 2.0**
-> - 本分支由 [Andrew](https://moechu.cn)（GitHub: [Andrew8102](https://github.com/Andrew8102)）修改，针对 **PHP 8.4** 与 **Kimi K2/K3 等思考型模型**做了兼容修复，并在 2.1.0 吸收上游 2.0 的功能
+> - 修改者：[Andrew8102](https://github.com/Andrew8102)，针对 **PHP 8.4** 与 **Kimi K2/K3 等思考型模型**做了兼容修复，并在 2.1.0 吸收上游 2.0 的功能
 > - 原项目版权归 Rockytkg 所有；本分支的修改同样以 Apache-2.0 发布
 >
-> 使用问题、Bug 反馈欢迎到 [moechu.cn](https://moechu.cn) 留言，或在 [Issues](https://github.com/Andrew8102/AIContentSummary/issues) 提出。
+> 使用问题、Bug 反馈欢迎在 [Issues](https://github.com/Andrew8102/AIContentSummary/issues) 提出。
 
 ## 为什么有这个分支
 
@@ -146,16 +146,16 @@ API 地址带不带 `/v1` 都可以，插件会自动补全。
 [2026-10-30 10:21:12] 生成成功：cid=130 摘要长度=96
 ```
 
-## 关于本分支作者
+## 关于本分支
 
-**Andrew** — [moechu.cn](https://moechu.cn) ｜ [GitHub @Andrew8102](https://github.com/Andrew8102)
+**Andrew8102** — [GitHub @Andrew8102](https://github.com/Andrew8102)
 
 这个分支起因于自己站点从 Typecho 1.1 + PHP 7.4 升级到 1.3 + PHP 8.4，一路踩完上面的坑后整理而来。
-遇到问题欢迎到 [moechu.cn](https://moechu.cn) 留言，或在 [Issues](https://github.com/Andrew8102/AIContentSummary/issues) 提出。
+遇到问题欢迎在 [Issues](https://github.com/Andrew8102/AIContentSummary/issues) 提出。
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)。原项目版权归 Rockytkg 所有，本分支修改部分版权归 Andrew（[moechu.cn](https://moechu.cn)）所有。
+[Apache License 2.0](LICENSE)。原项目版权归 Rockytkg 所有，本分支修改部分版权归 Andrew8102 所有。
 
 ## 致谢
 

@@ -12,12 +12,12 @@
  * 读取统一走 cfg()，写入顺序为「历史名优先」，因此从任意方向升级都不会丢配置。
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
- * 修改者 Andrew（https://moechu.cn），Apache-2.0。
+ * 修改者 Andrew8102，Apache-2.0。
  *
  * @package AIContentSummary
- * @author Andrew (Andrew8102)
+ * @author Rockytkg, Andrew8102
  * @version 2.1.0
- * @link https://moechu.cn
+ * @link https://github.com/Rockytkg/AIContentSummary
  */
 
 if (!class_exists('AIContentSummary_Api')) {

@@ -3,9 +3,9 @@
  * AIContentSummary 是一个用于通过调用 AI 接口，根据文章内容生成摘要的 Typecho 插件
  *
  * @package AIContentSummary
- * @author Andrew (Andrew8102)
+ * @author Rockytkg, Andrew8102
  * @version 2.1.0
- * @link https://moechu.cn
+ * @link https://github.com/Rockytkg/AIContentSummary
  */
 
 /*
@@ -32,7 +32,7 @@
  * 版权与来源（Apache License 2.0）：
  *  本文件基于 Rockytkg/AIContentSummary 修改而来，原项目版权归 Rockytkg 所有，
  *  原项目地址 https://github.com/Rockytkg/AIContentSummary
- *  修改者 Andrew（https://moechu.cn ，GitHub @Andrew8102），修改时间 2026-10
+ *  修改者 Andrew8102，修改时间 2026-10
  *  修改内容：PHP 8.4 兼容；Kimi K2/K3 等思考型模型的 temperature 与 max_tokens 适配；
  *           白屏与不生成摘要的修复；配置键双名兼容；后台面板与正文前置摘要的整合。
  *  修改部分同样以 Apache-2.0 发布，详见仓库 README。

@@ -3,8 +3,8 @@
 一个用于 Typecho 的 AI 文章摘要插件：在文章发布后自动调用 AI 接口，根据正文生成摘要并保存为自定义字段，前台列表/摘要输出时优先展示该摘要；后台提供摘要管理面板，可逐条编辑、清空、生成。
 
 - **版本**：2.1.0（PHP 8.4 / 思考型模型兼容 + 吸收上游 2.0 能力）
-- **本分支维护者**：Andrew（[moechu.cn](https://moechu.cn) ｜ [GitHub @Andrew8102](https://github.com/Andrew8102)）
-- **原项目作者**：Joinliu（[Rockytkg/AIContentSummary](https://github.com/Rockytkg/AIContentSummary)）
+- **原作者**：Rockytkg（[Rockytkg/AIContentSummary](https://github.com/Rockytkg/AIContentSummary)）
+- **修改者**：Andrew8102
 - **兼容环境**：PHP 7.4 ~ 8.4、Typecho 1.2 / 1.3
 
 > **本目录是修改版（Fork）。** 原始项目遵循 Apache License 2.0，原项目版权归 Rockytkg 所有；
@@ -81,6 +81,6 @@ AIContentSummary/
 
 ## 开源协议
 
-本插件基于原版 AIContentSummary（作者 Joinliu / Rockytkg）修改，遵循相同许可 Apache License 2.0。
+本插件基于原版 AIContentSummary（作者 Rockytkg）修改，遵循相同许可 Apache License 2.0。
 原项目地址：<https://github.com/Rockytkg/AIContentSummary>
-本分支维护：Andrew（<https://moechu.cn>，GitHub [@Andrew8102](https://github.com/Andrew8102)）
+修改者：Andrew8102

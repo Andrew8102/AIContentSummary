@@ -10,12 +10,12 @@
  *   cid  = 指定文章 id；不传则返回「缺少摘要的文章列表」
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
- * 修改者 Andrew（https://moechu.cn），Apache-2.0。
+ * 修改者 Andrew8102，Apache-2.0。
  *
  * @package AIContentSummary
- * @author Andrew (Andrew8102)
+ * @author Rockytkg, Andrew8102
  * @version 2.1.0
- * @link https://moechu.cn
+ * @link https://github.com/Rockytkg/AIContentSummary
  */
 
 @ini_set('display_errors', '0');

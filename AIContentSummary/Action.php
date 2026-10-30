@@ -13,12 +13,12 @@
  *    （思考型模型的 max_tokens 放大重试与 reasoning 兜底都在这里生效）。
  *
  * 版权与来源：基于 Rockytkg/AIContentSummary 修改，原项目版权归 Rockytkg 所有；
- * 修改者 Andrew（https://moechu.cn），Apache-2.0。
+ * 修改者 Andrew8102，Apache-2.0。
  *
  * @package AIContentSummary
- * @author Andrew (Andrew8102)
+ * @author Rockytkg, Andrew8102
  * @version 2.1.0
- * @link https://moechu.cn
+ * @link https://github.com/Rockytkg/AIContentSummary
  */
 
 namespace TypechoPlugin\AIContentSummary;
