@@ -2,8 +2,24 @@
 /**
  * AIContentSummary 是一个用于通过调用 AI 接口，根据文章内容生成摘要的 Typecho 插件
  *
- * @description 根据文章内容调用 AI 生成摘要：兼容 PHP 8.4、Kimi K2/K3 等思考型模型，吸收上游 2.0 的摘要管理面板与正文前置摘要
- * @category plugin
+ * @package AIContentSummary
+ * @author Andrew (Andrew8102)
+ * @version 2.1.0
+ * @link https://moechu.cn
+ */
+
+/*
+ * ---------------------------------------------------------------------------
+ * 说明：上方 docblock 供 Typecho\Plugin::parseInfo() 解析插件元信息，
+ * 只允许出现它认识的字段：@package / @author / @link / @since / @version。
+ * 其余以 @ 开头的键（如 @description、@category）会被静默丢弃；
+ * 且在第一个 @ 字段之前的所有非空行都会被逐行拼进「描述」。
+ * 所以变更记录、兼容说明、版权声明一律不许写在上方 docblock 里。
+ *
+ * 本段及下方变更记录都使用普通块注释（非 docblock）——
+ * parseInfo 只读文件里第一个 DOC_COMMENT，普通块注释它不会解析。
+ * 改完请跑：php _probe/tmp/hdr_guard.php _v21/AIContentSummary/Plugin.php
+ * ---------------------------------------------------------------------------
  *
  * 兼容说明：
  *  - 运行环境：PHP 7.4 ~ 8.4（不使用 8.x 废弃语法，类型化/空值访问均已加防护）
@@ -13,34 +29,6 @@
  *    与上游 2.0 键名（fieldName / summaryLength / finishPublishSummary /
  *    outputSummaryInHeader / summaryTemplate / prompt），从任意方向升级都不丢配置。
  *
- * 2.1.0（本版）主要变更 —— 吸收上游 2.0 的优点：
- *  - 代码结构对齐上游 2.0：命名空间 TypechoPlugin\AIContentSummary，
- *    拆为 Plugin.php（主逻辑）+ Action.php（后台动作）+ template/summaries.php（管理面板）。
- *    这样上游将来若更新，可以直接对照 diff 合并。
- *  - 新增后台「摘要管理」面板：列表显示所有文章的摘要，支持逐条就地编辑 / 清空 / 单篇生成，
- *    以及批量生成（串行，避免限流）。上游 2.0 的核心体验。
- *  - 新增「正文前置摘要」（contentEx 钩子）：可配置摘要模板，用 {summary} 占位符，
- *    默认输出 <aside class="ai-content-summary"> 结构。
- *  - 新增「系统提示词」可自定义；留空则用内置的中文摘要提示词。
- *  - 新增编辑页的「AI 摘要」自定义字段（管理员可见），手填即跳过自动生成。
- *
- * 1.8.2 变更（思考型模型的正文为空）：
- *  - 现象：批量补生成时 kimi-k3 这类模型报「模型没有返回正文（finish_reason=length）」。
- *  - 根因：max_tokens 按「摘要字数 × 4」给（100 字 → 400），思考型模型光推理就用光预算。
- *  - 修正：识别思考型模型并给 4096~32768 预算；仍被截断时自动放大 4 倍重试一次；
- *    再不行就从 reasoning_content 里保守提取草稿，不让整批任务白跑。
- *
- * 1.8.1 变更：已有摘要的文章再次保存时直接跳过，不重复调接口、不覆盖手工修订。
- *
- * 1.8 变更（修复「保存文章白屏 + 从不生成摘要」）：
- *  - 白屏根因：onFinishPublish 里调用了 fastcgi_finish_request()，提前结束响应，
- *    导致 Notice::set() 与跳转发不出去。已删除该调用与 session_write_close()。
- *  - 不生成摘要的根因：cid 用 isset($obj->cid) 判断，而 Typecho 的 Widget 属性是
- *    魔术属性且未实现 __isset，isset() 恒为 false → cid=0 → 直接 return。
- *
- * 1.7 变更：测试接口改为独立文件 test.php，不再依赖 Typecho 路由表（路由表存在数据库里，
- *  插件升级后旧路由不会自动消失，指向插件类会导致 500），并自动清理遗留的坏路由。
- *
  * 版权与来源（Apache License 2.0）：
  *  本文件基于 Rockytkg/AIContentSummary 修改而来，原项目版权归 Rockytkg 所有，
  *  原项目地址 https://github.com/Rockytkg/AIContentSummary
@@ -48,13 +36,6 @@
  *  修改内容：PHP 8.4 兼容；Kimi K2/K3 等思考型模型的 temperature 与 max_tokens 适配；
  *           白屏与不生成摘要的修复；配置键双名兼容；后台面板与正文前置摘要的整合。
  *  修改部分同样以 Apache-2.0 发布，详见仓库 README。
- *
- * @package AIContentSummary
- * @author Andrew (Andrew8102)
- * @version 2.1.0
- * @link https://moechu.cn
- * @original_author Joinliu (Rockytkg)
- * @original_link https://github.com/Rockytkg/AIContentSummary
  */
 
 namespace TypechoPlugin\AIContentSummary;
@@ -62,6 +43,7 @@ namespace TypechoPlugin\AIContentSummary;
 use Typecho\Common;
 use Typecho\Db;
 use Typecho\Plugin as TypechoPlugin;
+use Typecho\Plugin\PluginInterface;
 use Typecho\Widget\Helper\Form;
 use Typecho\Widget\Helper\Form\Element\Radio;
 use Typecho\Widget\Helper\Form\Element\Text;
@@ -83,11 +65,56 @@ if (is_file(__DIR__ . '/Api.php')) {
     require_once __DIR__ . '/Api.php';
 }
 
-// Typecho 1.2+ 的 PluginInterface 把 activate/deactivate 声明为 : void，
-// 但仍要求返回一条提示文案 —— 旧版插件返回字符串，1.3 会直接抛
-// 「A void method must not return a value」。这里用不声明返回类型的方式兼容两版：
-// 1.2 / 1.3 都不校验返回类型，文案由 Typecho 自己拼，不再依赖返回值。
-class Plugin extends \Typecho\Plugin\PluginInterface
+// 注意：运行时清理失效钩子的代码放在文件末尾（类定义之后），
+// 因为要调用 Plugin::pruneLegacyHooks()，此处类还没定义。
+
+// 关于 activate() / deactivate() 的返回类型：
+// Typecho 1.3 的 PluginInterface 里这两个方法**并未声明** `: void`，
+// 而且 Widget\Plugins\Edit::activate() 里 `$result` 是被完全忽略的 ——
+// 启用是否成功只看有没有抛 Plugin\Exception。所以方法体里不必 return 任何文案。
+// 这里仍显式写 `: void`（合法的子类型细化），代价是方法体绝对不能 return 值，
+// 否则会报「A void method must not return a value」——这正是 2.1.0 初稿踩过的坑。
+//
+// 注意：必须写成 implements 而不是 extends。Typecho\Plugin::parseInfo() 靠
+// token_get_all() 里的 T_IMPLEMENTS 令牌来置位 $isClass，再用它判断
+// activate/deactivate/config/personalConfig 四个方法是否存在；写成 extends
+// 就不会产生 T_IMPLEMENTS，四个标记全为 false，后台插件页会把它归为「即插即用」，
+// 连「禁用」「设置」链接都不显示。
+
+/*
+ * 变更记录（放在这里而不是文件头 docblock，避免被 parseInfo 拼进插件描述）
+ *
+ * 2.1.0 —— 吸收上游 2.0 的优点：
+ *  - 代码结构对齐上游 2.0：命名空间 TypechoPlugin\AIContentSummary，
+ *    拆为 Plugin.php（主逻辑）+ Action.php（后台动作）+ template/summaries.php（管理面板）。
+ *    这样上游将来若更新，可以直接对照 diff 合并。
+ *  - 新增后台「摘要管理」面板：列表显示所有文章的摘要，支持逐条就地编辑 / 清空 / 单篇生成，
+ *    以及批量生成（串行，避免限流）。上游 2.0 的核心体验。
+ *  - 新增「正文前置摘要」（contentEx 钩子）：可配置摘要模板，用 {summary} 占位符，
+ *    默认输出 <aside class="ai-content-summary"> 结构。
+ *  - 新增「系统提示词」可自定义；留空则用内置的中文摘要提示词。
+ *  - 新增编辑页的「AI 摘要」自定义字段（管理员可见），手填即跳过自动生成。
+ *  - 修正：类声明改用 implements PluginInterface，避免后台被判为「即插即用」。
+ *
+ * 1.8.2 —— 思考型模型的正文为空：
+ *  - 现象：批量补生成时 kimi-k3 这类模型报「模型没有返回正文（finish_reason=length）」。
+ *  - 根因：max_tokens 按「摘要字数 × 4」给（100 字 → 400），思考型模型光推理就用光预算。
+ *  - 修正：识别思考型模型并给 4096~32768 预算；仍被截断时自动放大 4 倍重试一次；
+ *    再不行就从 reasoning_content 里保守提取草稿，不让整批任务白跑。
+ *
+ * 1.8.1 —— 已有摘要的文章再次保存时直接跳过，不重复调接口、不覆盖手工修订。
+ *
+ * 1.8 —— 修复「保存文章白屏 + 从不生成摘要」：
+ *  - 白屏根因：onFinishPublish 里调用了 fastcgi_finish_request()，提前结束响应，
+ *    导致 Notice::set() 与跳转发不出去。已删除该调用与 session_write_close()。
+ *  - 不生成摘要的根因：cid 用 isset($obj->cid) 判断，而 Typecho 的 Widget 属性是
+ *    魔术属性且未实现 __isset，isset() 恒为 false → cid=0 → 直接 return。
+ *
+ * 1.7 —— 测试接口改为独立文件 test.php，不再依赖 Typecho 路由表（路由表存在数据库里，
+ *  插件升级后旧路由不会自动消失，指向插件类会导致 500），并自动清理遗留的坏路由。
+ */
+
+final class Plugin implements PluginInterface
 {
     /**
      * 插件名（也是后台面板与配置的标识，勿改）
@@ -110,6 +137,12 @@ class Plugin extends \Typecho\Plugin\PluginInterface
     private const LEGACY_ROUTE = 'aicontentsummary_test';
 
     /**
+     * 1.x 的扁平类名。旧版把钩子注册成 ['AIContentSummary_Plugin', 'customExcerpt']，
+     * 升级到命名空间版本后这个类已不存在，残留在数据库里的回调会让整站 500。
+     */
+    private const LEGACY_CLASS = 'AIContentSummary_Plugin';
+
+    /**
      * 日志文件（位于插件目录）
      */
     public const LOG_FILE = 'debug.log';
@@ -127,6 +160,10 @@ class Plugin extends \Typecho\Plugin\PluginInterface
         // 清掉 1.5/1.6 遗留的错误路由（那条路由指向插件类，访问必 500）
         self::cleanupLegacyRoute();
 
+        // 清掉 1.x 遗留的钩子回调（旧扁平类 AIContentSummary_Plugin 已不存在，
+        // 残留的 excerptEx 回调会让文章页抛「does not have a method customExcerpt」）
+        self::cleanupLegacyHooks();
+
         Helper::addPanel(3, self::PANEL, _t('摘要管理'), _t('管理 AI 摘要'), 'administrator');
         Helper::addAction(self::ACTION, Action::class);
     }
@@ -139,6 +176,7 @@ class Plugin extends \Typecho\Plugin\PluginInterface
         Helper::removePanel(3, self::PANEL);
         Helper::removeAction(self::ACTION);
         self::cleanupLegacyRoute();
+        self::cleanupLegacyHooks();
     }
 
     /**
@@ -980,4 +1018,176 @@ HTML;
             // 清理失败不影响插件功能
         }
     }
+
+    /**
+     * 清理 1.x 遗留的钩子回调（写库）。
+     *
+     * 背景：1.x 用扁平类 AIContentSummary_Plugin，钩子挂在旧式 handle 名上
+     * （Widget_Abstract_Contents:excerptEx）；2.x 改成带命名空间的类，钩子挂在新式
+     * handle 名上（Widget\Base\Contents:excerptEx）。**两者是完全不同的键**——
+     * Typecho 的 Common::nativeClassName() 把 `\` 换成 `_`，旧类名与新类名转换后不等，
+     * 所以新版 activate() 只是新增键，旧键原封不动留在数据库的 options.plugins 里。
+     *
+     * 而 Typecho\Plugin::filter() 是直接 call_user_func_array()，并不校验 callback 是否可调用，
+     * 于是旧回调 ['AIContentSummary_Plugin','customExcerpt'] 在类已不存在时会抛
+     * 「does not have a method "customExcerpt"」，整站文章页 500。
+     *
+     * Typecho 自带的 Plugin::deactivate() 只清理「当前插件名下登记的 handles」，
+     * 旧版本登记在新旧不同的键上，它清不到。这里直接把残留项从库里摘掉。
+     */
+    private static function cleanupLegacyHooks(): void
+    {
+        try {
+            $db = Db::get();
+            $row = $db->fetchRow(
+                $db->select('value')->from('table.options')->where('name = ?', 'plugins')
+            );
+
+            if (empty($row['value'])) {
+                return;
+            }
+
+            $plugins = json_decode($row['value'], true);
+            if (!is_array($plugins)) {
+                return;
+            }
+
+            $pruned = self::pruneLegacyHooks($plugins);
+            if ($pruned === $plugins) {
+                return;
+            }
+
+            $db->query(
+                $db->update('table.options')
+                    ->rows(array('value' => json_encode($pruned)))
+                    ->where('name = ?', 'plugins')
+            );
+
+            self::log('已清理 1.x 遗留钩子回调（' . self::LEGACY_CLASS . '）');
+        } catch (\Throwable $e) {
+            // 清理失败不影响插件功能，但记一笔便于排查
+            self::log('清理遗留钩子失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 纯函数：返回剔除 1.x 遗留回调后的插件配置。
+     *
+     * 供两处共用 ——
+     *  - cleanupLegacyHooks()：清理数据库（持久）
+     *  - 插件文件加载时：清理内存里的静态表（当次立即生效，已升级的站点不必重新启用）
+     *
+     * 输入输出结构就是 Plugin::export() / options.plugins 的 json 结构。
+     * 没有需要剔除的项时原样返回（调用方可用 !== 判断是否需要写库）。
+     */
+    public static function pruneLegacyHooks(array $plugins): array
+    {
+        if (empty($plugins['handles']) && empty($plugins['activated'])) {
+            return $plugins;
+        }
+
+        // 1.x 遗留的扁平类名
+        $isLegacy = function ($callback): bool {
+            if (is_array($callback) && isset($callback[0]) && is_string($callback[0])) {
+                return ltrim($callback[0], '\\') === self::LEGACY_CLASS;
+            }
+
+            if (is_string($callback) && strpos($callback, self::LEGACY_CLASS) !== false) {
+                return true;
+            }
+
+            return false;
+        };
+
+        // 剔掉一组回调里的遗留项；全被剔光就返回 null 表示整个 handle 该删
+        $filter = function ($callbacks) use ($isLegacy) {
+            if (!is_array($callbacks)) {
+                return $callbacks;
+            }
+
+            $kept = array();
+            foreach ($callbacks as $callback) {
+                if (!$isLegacy($callback)) {
+                    $kept[] = $callback;
+                }
+            }
+
+            if (count($kept) === count($callbacks)) {
+                return $callbacks; // 没变化，保持原值
+            }
+
+            return empty($kept) ? null : array_values($kept);
+        };
+
+        // 1) 主 hook 表
+        if (!empty($plugins['handles']) && is_array($plugins['handles'])) {
+            foreach ($plugins['handles'] as $handle => $callbacks) {
+                $result = $filter($callbacks);
+                if ($result === $callbacks) {
+                    continue;
+                }
+                if ($result === null) {
+                    unset($plugins['handles'][$handle]);
+                } else {
+                    $plugins['handles'][$handle] = $result;
+                }
+            }
+        }
+
+        // 2) activated 里登记的各插件 handles（停用时要靠它做 diff，留着旧项会出错）
+        if (!empty($plugins['activated']) && is_array($plugins['activated'])) {
+            foreach ($plugins['activated'] as $name => $meta) {
+                if (empty($meta['handles']) || !is_array($meta['handles'])) {
+                    continue;
+                }
+
+                foreach ($meta['handles'] as $handle => $callbacks) {
+                    $result = $filter($callbacks);
+                    if ($result === $callbacks) {
+                        continue;
+                    }
+                    if ($result === null) {
+                        unset($plugins['activated'][$name]['handles'][$handle]);
+                    } else {
+                        $plugins['activated'][$name]['handles'][$handle] = $result;
+                    }
+                }
+
+                if (empty($plugins['activated'][$name]['handles'])) {
+                    unset($plugins['activated'][$name]['handles']);
+                }
+            }
+        }
+
+        return $plugins;
+    }
+}
+
+/*
+ * 运行时兜底：清掉内存里的失效钩子回调（放在类定义之后才能调用 Plugin::pruneLegacyHooks）。
+ *
+ * 为什么需要「运行时」而不是只在 activate() 里清一次：
+ * 已经升级上来、插件仍是启用状态的站点不会重新走 activate()，而数据库里的
+ * options.plugins 还留着 1.x 的 ['AIContentSummary_Plugin','customExcerpt']。
+ * Typecho\Plugin::filter() 直接 call_user_func_array()，不校验可调用性，
+ * 于是文章页会抛 TypeError 整站 500 —— 用户看到的就是
+ * 「class TypechoPlugin\AIContentSummary\Plugin does not have a method "customExcerpt"」。
+ *
+ * 这里在插件文件被加载时把静态 $plugin 表过滤一遍并回写，当次请求立刻恢复；
+ * 数据库的持久清理由 activate() / deactivate() 里的 cleanupLegacyHooks() 负责。
+ * 整段包 try/catch：兜底代码本身绝不能成为新的故障点。
+ */
+try {
+    if (class_exists('\Typecho\Plugin') && class_exists(__NAMESPACE__ . '\Plugin', false)) {
+        $GLOBALS['__aics_raw_hooks'] = \Typecho\Plugin::export();
+        $GLOBALS['__aics_pruned_hooks'] = Plugin::pruneLegacyHooks($GLOBALS['__aics_raw_hooks']);
+
+        if ($GLOBALS['__aics_pruned_hooks'] !== $GLOBALS['__aics_raw_hooks']) {
+            \Typecho\Plugin::init($GLOBALS['__aics_pruned_hooks']);
+        }
+    }
+} catch (\Throwable $e) {
+    // 兜底失败也不能影响页面
+} finally {
+    unset($GLOBALS['__aics_raw_hooks'], $GLOBALS['__aics_pruned_hooks']);
 }

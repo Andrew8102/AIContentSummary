@@ -66,6 +66,44 @@ AIContentSummary 是一个用于通过调用 AI 接口，根据文章内容生�
 - 无连通性测试 → 新增 `test.php`，绕开路由表，失败时指出卡在哪一步（config / network / api / token / bootstrap）
 - 无批量补生成 → 新增 `regen.php`，设置页一键扫描补生成
 - 配置键与 1.x 不同 → 双名兼容，从任意方向升级都不丢配置
+- **后台被判为「即插即用」** → 类声明从 `extends PluginInterface` 改为 `implements`（见下方说明）
+
+### 两个容易被踩的 Typecho 细节
+
+**1. 插件头 docblock 只能放元信息**
+
+Typecho 用 `Plugin::parseInfo()` + `token_get_all()` 解析插件头，规则相当挑剔：
+
+- 只认 `@package`（→ 插件名）、`@author`、`@link`（→ 主页）、`@since`、`@version` 五个键，其余 `@` 键**静默丢弃**
+- **从 docblock 第一行到第一个 `@` 字段之间的所有非空行，会逐行拼进「描述」**
+
+所以变更记录、兼容说明、版权声明**一律不能写在文件头 docblock 里**，否则后台插件列表里会显示一大坨文字。本插件已把变更记录移到 `Plugin.php` 类声明之前的独立注释块（`/* ... */`，非 `/** ... */`），`parseInfo` 不会读取。
+
+**2. 必须写 `implements`，不能写 `extends`**
+
+`parseInfo()` 靠 `token_get_all()` 里的 **`T_IMPLEMENTS` 令牌**来置位 `$isClass`，再用它判断 `activate` / `deactivate` / `config` / `personalConfig` 四个方法是否存在。若写成 `class Plugin extends PluginInterface`，源码里没有 `T_IMPLEMENTS`，四个标记全为 `false`，后台就显示成「即插即用」，连「禁用」和「设置」链接都不出现。
+
+> 顺便纠正一个常见误解：Typecho 1.3 的 `PluginInterface` 方法**没有**声明 `: void`，`activate()` 的返回值也**被完全忽略**（启用是否成功只看有没有抛 `Plugin\Exception`）。写了 `: void` 就只是严格的子类型细化，合法；但此时方法体内不能 `return` 任何值，否则报 `A void method must not return a value`。
+
+**3. 从 1.x 升级会残留旧钩子，导致整站文章页 500**
+
+这是升级时最容易中招的一条。报错长这样：
+
+```
+call_user_func_array(): Argument #1 ($callback) must be a valid callback,
+class TypechoPlugin\AIContentSummary\Plugin does not have a method "customExcerpt"
+```
+
+原因有两层：
+
+1. 1.x 的钩子注册成 `array('AIContentSummary_Plugin', 'customExcerpt')`，用的是**扁平类名**；2.x 改成带命名空间的结构后，这个类和方法都不存在了
+2. Typecho 把钩子**持久化在数据库** `options.plugins` 里，**升级插件不会自动清理**；而 `Typecho\Plugin::filter()` 是直接 `call_user_func_array()`，**不校验 callback 是否可调用**，于是每次渲染文章摘要都会崩
+
+还有一个隐蔽点：新旧 handle 名经 `__TYPECHO_CLASS_ALIASES__` 反向查找后会**归一成同一个键**（`Widget\Base\Contents` → `Widget_Abstract_Contents`），所以新插件注册时是往**同一个数组里追加**，旧回调不会被覆盖，而是一直排在新回调前面被执行。
+
+**本插件的处理**：`activate()` / `deactivate()` 会调用 `cleanupLegacyHooks()` 把旧回调从库里摘掉；插件文件被加载时还有一段**运行时兜底**，直接过滤内存里的静态钩子表，所以**升级后当次刷新就恢复**，不需要手工改数据库、也不需要重新启用插件。
+
+> 如果用的是别的分支、没有这段清理代码，手工自救办法是：后台**停用插件 → 彻底删除插件目录 → 重新上传 → 启用**。停用时 Typecho 会按登记的 handles 做 diff 清理，这是最稳的方式。直接改数据库 `options.plugins` 的 JSON 要格外小心——`handles` 和 `activated` 两处都要清，漏一处照样崩。
 
 ## 安装
 
